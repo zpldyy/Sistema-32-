@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Levi · Sistema-32</title>
+<meta name="description" content="Painel do Levi: sistema de segurança com ESP32, sensor de movimento, Telegram e Firebase.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23ffd23f%27/%3E%3Cpath d=%27M4 16q12-12 24 0q-12 12-24 0z%27 fill=%27%23fff%27 stroke=%27%2316130f%27 stroke-width=%272.500%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%274.500%27 fill=%27%2316130f%27/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout "bento": cartões de cores sólidas, bordas grossas e sombra deslocada (estilo pôster).
+   O destaque é o olho do Levi, que dorme, vigia ou arregala conforme o estado do sistema. */
+:root {
+  --bg: #f4efe4;
+  --card: #fffdf7;
+  --ink: #16130f;
+  --muted: #6b6558;
+  --yellow: #ffd23f;
+  --green: #5fdc97;
+  --red: #ff5a4d;
+  --blue: #5b84ff;
+  --gray: #cfc9b8;
+  --cell: #e6e0d0;
+  --font-title: "Bricolage Grotesque", "Arial Black", system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, Consolas, monospace;
+  --b: 3px;
+  --sh: 5px 5px 0 var(--ink);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14120e; --card: #201d16; --ink: #f3eee0; --muted: #a39d8c;
+    --yellow: #e9bd2a; --green: #3fbf7c; --red: #ef4a3d; --blue: #6a8dff; --gray: #4a463b; --cell: #2d2a21;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14120e; --card: #201d16; --ink: #f3eee0; --muted: #a39d8c;
+  --yellow: #e9bd2a; --green: #3fbf7c; --red: #ef4a3d; --blue: #6a8dff; --gray: #4a463b; --cell: #2d2a21;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  background-image: radial-gradient(var(--cell) 1.2px, transparent 1.4px); background-size: 22px 22px;
+  font-family: var(--font-title); font-weight: 500; font-size: 16px; line-height: 1.45;
+  padding-block: 22px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+[hidden] { display: none !important; }
+.wrap { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.card { background: var(--card); border: var(--b) solid var(--ink); border-radius: 18px; box-shadow: var(--sh); min-width: 0; }
+.eyebrow { margin: 0 0 8px; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+/* topo */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo h1 { margin: 0; font-size: clamp(2.2rem, 7vw, 3.2rem); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; }
+.sticker { transform: rotate(-3deg); background: var(--yellow); color: #16130f; border: var(--b) solid var(--ink); border-radius: 10px; padding: 3px 10px; font-family: var(--font-mono); font-size: 0.74rem; font-weight: 500; box-shadow: 3px 3px 0 var(--ink); }
+.pills { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: var(--b) solid var(--ink); border-radius: 999px; background: var(--card); font-family: var(--font-mono); font-size: 0.78rem; font-weight: 500; }
+.pill .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--gray); border: 2px solid var(--ink); flex: none; }
+.pill.on .dot { background: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+.pill.off .dot { background: var(--red); }
+@keyframes pulse { 50% { transform: scale(1.35); } }
+.tema { cursor: pointer; color: var(--ink); font: inherit; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 500; }
+.tema:hover { background: var(--yellow); color: #16130f; }
+
+/* herói: olho + estado + interruptor */
+.hero { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; overflow: hidden; background: var(--hc, var(--gray)); color: #16130f; transition: background-color .3s; }
+.hero[data-s="desarmado"] { --hc: var(--green); }
+.hero[data-s="armado"] { --hc: var(--yellow); }
+.hero[data-s="alarme"] { --hc: var(--red); animation: shake .5s linear infinite; }
+.hero[data-s="offline"] { --hc: var(--gray); }
+@keyframes shake { 0%, 100% { transform: translate(0); } 25% { transform: translate(-2px, 1px) rotate(-0.15deg); } 75% { transform: translate(2px, -1px) rotate(0.15deg); } }
+.eye-box { border-right: var(--b) solid var(--ink); display: grid; place-items: center; padding: 18px; background: rgba(255, 255, 255, 0.28); }
+.eye-box svg { width: 100%; max-width: 250px; height: auto; display: block; overflow: visible; }
+.hero-main { padding: 24px 28px; display: flex; flex-direction: column; justify-content: center; gap: 16px; min-width: 0; }
+.hero .eyebrow { color: #3a352b; margin: 0; }
+.word { margin: 0; font-size: clamp(2.8rem, 10vw, 5.4rem); font-weight: 800; line-height: 0.95; letter-spacing: -0.045em; text-transform: uppercase; overflow-wrap: anywhere; }
+.sub { margin: 0; min-height: 1.5em; font-size: 1.02rem; color: #2a261d; }
+
+/* interruptor grande */
+.switch { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 14px; align-self: flex-start; }
+.switch .track { position: relative; width: 112px; height: 54px; border: var(--b) solid var(--ink); border-radius: 999px; background: #fffdf7; box-shadow: 3px 3px 0 var(--ink); transition: background-color .2s; }
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 42px; height: 42px; border-radius: 50%; background: #16130f; display: grid; place-items: center; transition: transform .25s cubic-bezier(.3, 1.5, .5, 1); }
+.switch .knob svg { width: 20px; height: 20px; fill: none; stroke: #fffdf7; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.switch[aria-checked="true"] .track { background: #16130f; }
+.switch[aria-checked="true"] .knob { transform: translateX(58px); background: var(--yellow); }
+.switch[aria-checked="true"] .knob svg { stroke: #16130f; }
+.switch .lbl { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; color: #16130f; }
+.switch:disabled { opacity: 0.45; cursor: not-allowed; }
+.switch:not(:disabled):active .track { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.switch:focus-visible .track { outline: 3px solid var(--blue); outline-offset: 3px; }
+
+/* bento */
+.bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.cell { padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+.cell .big { font-size: clamp(2.4rem, 6vw, 3.6rem); font-weight: 800; line-height: 1; letter-spacing: -0.04em; }
+.cell .big.mono { font-weight: 500; letter-spacing: -0.02em; font-size: clamp(1.8rem, 4.5vw, 2.4rem); }
+.cell .note { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.cell.c-mov[data-m="1"] { background: var(--red); color: #16130f; }
+.cell.c-mov[data-m="1"] .note, .cell.c-mov[data-m="1"] .eyebrow { color: #3a1410; }
+.cell.c-oc { background: var(--blue); color: #fff; }
+.cell.c-oc .eyebrow, .cell.c-oc .note { color: rgba(255, 255, 255, 0.82); }
+.sinal { display: flex; align-items: flex-end; gap: 5px; height: 38px; }
+.sinal i { width: 14px; border: 2.5px solid var(--ink); border-radius: 4px; background: var(--cell); }
+.sinal i:nth-child(1) { height: 30%; } .sinal i:nth-child(2) { height: 52%; } .sinal i:nth-child(3) { height: 76%; } .sinal i:nth-child(4) { height: 100%; }
+.sinal i.on { background: var(--green); }
+
+/* faixa de 24 h e eventos */
+.row { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.heat { padding: 18px 20px; }
+.heat header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.heat h2, .feed h2 { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; }
+.heat header span, .feed header span { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); }
+.strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 5px; }
+.strip i { aspect-ratio: 1 / 1.5; border: 2.5px solid var(--ink); border-radius: 6px; background: var(--cell); }
+.strip i.h1 { background: var(--yellow); } .strip i.h2 { background: var(--red); }
+.axis { display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); }
+
+.feed header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 16px 20px 12px; }
+.feed ul { list-style: none; margin: 0; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+.feed li { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; padding: 10px 14px; border: 2.5px solid var(--ink); border-radius: 12px; background: var(--card); }
+.feed li[data-k="INTRUSAO"] { background: var(--red); color: #16130f; }
+.feed li[data-k="ARMADO"] { background: var(--yellow); color: #16130f; }
+.feed li[data-k="DESARMADO"] { background: var(--green); color: #16130f; }
+.feed .hora { font-family: var(--font-mono); font-size: 0.9rem; font-weight: 500; }
+.feed .txt { font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.feed .txt small { display: block; font-family: var(--font-mono); font-weight: 400; font-size: 0.72rem; opacity: 0.75; }
+.feed .quando { font-family: var(--font-mono); font-size: 0.74rem; text-align: right; opacity: 0.8; }
+.feed .vazio { display: block; text-align: center; padding: 26px 10px; color: var(--muted); border-style: dashed; background: transparent; }
+
+.foot { text-align: center; font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); }
+
+/* o olho do Levi */
+.eye .branco { fill: #fffdf7; stroke: #16130f; stroke-width: 5; stroke-linejoin: round; }
+.eye .iris { fill: var(--blue); stroke: #16130f; stroke-width: 4; }
+.eye .pupila { fill: #16130f; transform-box: fill-box; transform-origin: center; }
+.eye .brilho { fill: #fff; }
+.eye .fechado { fill: none; stroke: #16130f; stroke-width: 6; stroke-linecap: round; }
+.eye .cilios { stroke: #16130f; stroke-width: 5; stroke-linecap: round; }
+.eye .zzz { font-family: var(--font-title); font-weight: 800; fill: #16130f; font-size: 22px; opacity: 0; }
+.eye .aberto, .eye .zzz { display: none; }
+.hero[data-s="desarmado"] .eye .fechado, .hero[data-s="offline"] .eye .fechado { display: block; }
+.hero[data-s="desarmado"] .eye .zzz { display: block; }
+.hero[data-s="armado"] .eye .aberto, .hero[data-s="alarme"] .eye .aberto { display: block; }
+.hero[data-s="armado"] .eye .fechado, .hero[data-s="alarme"] .eye .fechado { display: none; }
+.hero[data-s="offline"] .eye .fechado { stroke-dasharray: 2 12; }
+.hero[data-s="alarme"] .eye .iris { fill: #fff; }
+.hero[data-s="alarme"] .eye .pupila { transform: scale(0.55); }
+.hero[data-m="1"] .eye .pupila { transform: scale(1.35); }
+.hero[data-s="alarme"][data-m="1"] .eye .pupila { transform: scale(0.8); }
+.eye .olhar { transform-box: view-box; }
+@media (prefers-reduced-motion: no-preference) {
+  .hero[data-s="armado"] .eye .olhar { animation: varre 3.6s ease-in-out infinite; }
+  .hero[data-s="alarme"] .eye .olhar { animation: varre 0.5s ease-in-out infinite; }
+  .hero[data-s="desarmado"] .eye .zzz { animation: sobe 3s ease-in infinite; }
+  .hero[data-s="desarmado"] .eye .zzz:nth-of-type(2) { animation-delay: 1s; }
+  .hero[data-s="desarmado"] .eye .zzz:nth-of-type(3) { animation-delay: 2s; }
+  .eye .pupila { transition: transform .2s; }
+}
+@keyframes varre { 0%, 100% { transform: translateX(-17px); } 50% { transform: translateX(17px); } }
+@keyframes sobe { 0% { opacity: 0; transform: translate(0, 6px); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -22px); } }
+@media (prefers-reduced-motion: reduce) { .hero[data-s="alarme"] { animation: none; } .pill.on .dot { animation: none; } }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr; }
+  .eye-box { border-right: 0; border-bottom: var(--b) solid var(--ink); padding: 14px; }
+  .eye-box svg { max-width: 190px; }
+  .hero-main { padding: 20px; }
+  .bento { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .bento .c-up { grid-column: 1 / -1; }
+  .feed li { grid-template-columns: auto 1fr; row-gap: 2px; }
+  .feed .quando { grid-column: 2; text-align: left; }
+  .strip { gap: 3px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="logo">
+      <h1>Levi</h1>
+      <span class="sticker">Sistema-32</span>
+    </div>
+    <div class="pills">
+      <div class="pill" id="conn" role="status"><span class="dot"></span><span id="connTxt">Conectando…</span></div>
+      <button class="pill tema" id="temaBtn" type="button" aria-label="Alternar entre tema claro e escuro"></button>
+    </div>
+  </header>
+
+  <section class="card hero" id="hero" data-s="offline" data-m="0" aria-live="polite">
+    <div class="eye-box" aria-hidden="true">
+      <svg class="eye" viewBox="0 0 200 130">
+        <g class="aberto">
+          <path class="branco" d="M10 65Q100 -5 190 65Q100 135 10 65Z"/>
+          <g class="olhar">
+            <circle class="iris" cx="100" cy="65" r="34"/>
+            <circle class="pupila" cx="100" cy="65" r="17"/>
+            <circle class="brilho" cx="90" cy="54" r="6"/>
+          </g>
+        </g>
+        <g class="fechado-g">
+          <path class="fechado" d="M14 62Q100 118 186 62"/>
+          <path class="fechado cilios" d="M46 86 38 100M80 100 76 116M120 100 124 116M154 86 162 100" style="stroke-width:5"/>
+        </g>
+        <text class="zzz" x="150" y="34">z</text>
+        <text class="zzz" x="150" y="34">z</text>
+        <text class="zzz" x="150" y="34">Z</text>
+      </svg>
+    </div>
+    <div class="hero-main">
+      <p class="eyebrow">O Levi está</p>
+      <h2 class="word" id="word">—</h2>
+      <p class="sub" id="sub"></p>
+      <button class="switch" id="sw" type="button" role="switch" aria-checked="false" disabled>
+        <span class="track"><span class="knob"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span></span>
+        <span class="lbl" id="swLbl">Armar</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="bento" aria-label="Medições">
+    <div class="card cell c-mov" id="cMov" data-m="0"><p class="eyebrow">Sensor de movimento</p><div class="big" id="pir">—</div><p class="note" id="pirN">Leitura em tempo real</p></div>
+    <div class="card cell c-oc"><p class="eyebrow">Intrusões</p><div class="big" id="oc">0</div><p class="note">desde que o sistema ligou</p></div>
+    <div class="card cell"><p class="eyebrow">Wi-Fi</p><div class="sinal" id="bars"><i></i><i></i><i></i><i></i></div><p class="note mono" id="rssi">—</p></div>
+    <div class="card cell c-up"><p class="eyebrow">Ligado há</p><div class="big mono" id="up">—</div><p class="note">horas : minutos : segundos</p></div>
+  </section>
+
+  <section class="card heat" aria-label="Intrusões nas últimas 24 horas">
+    <header><h2>Últimas 24 horas</h2><span id="heatN"></span></header>
+    <div class="strip" id="strip" role="img" aria-label="Uma caixa por hora; vermelha indica intrusões"></div>
+    <div class="axis" aria-hidden="true"><span>há 24 h</span><span>há 12 h</span><span>agora</span></div>
+  </section>
+
+  <section class="card feed" aria-label="Histórico">
+    <header><h2>O que aconteceu</h2><span id="logN"></span></header>
+    <ul id="events"></ul>
+  </section>
+
+  <footer class="foot">Levi · Sistema-32 · ESP32 + Telegram + Firebase</footer>
+</div>
+
+<script>
+/* =====================================================================
+   >>> COLE AQUI A URL DO SEU FIREBASE (troque o texto entre aspas) <<<
+   Formato: https://nome-do-projeto-default-rtdb.firebaseio.com   (sem barra no final)
+   ===================================================================== */
+const FIREBASE_URL = "https://sistema-esp-32-default-rtdb.firebaseio.com";
+
+const RAIZ = "/central";      // pasta do banco onde o ESP32 grava: estado, eventos e comando
+const POLL_MS = 1000;
+const ONLINE_MS = 15000;
+const $ = (id) => document.getElementById(id);
+
+let demo = false, online = false, pending = null, EV = [];
+let S = { armado: false, alarme: false, pir: false, rssi: null, uptime: 0, ocorrencias: 0, ts: 0 };
+
+function baseUrl() {
+  const u = (FIREBASE_URL || "").trim().replace(/\/+$/, "");
+  return /^https?:\/\//.test(u) ? u : "";   // ainda não preenchido: modo demonstração
+}
+
+/* ---------- formatação ---------- */
+const pad = (n) => String(n).padStart(2, "0");
+const fmtUp = (s) => { s = Math.max(0, Math.floor(s || 0)); return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor(s / 60) % 60) + ":" + pad(s % 60); };
+const fmtClock = (ts) => { const d = new Date(ts); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+function ago(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 5) return "agora";
+  if (s < 60) return "há " + s + " s";
+  if (s < 3600) return "há " + Math.floor(s / 60) + " min";
+  if (s < 86400) return "há " + Math.floor(s / 3600) + " h";
+  const d = new Date(ts);
+  return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " às " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+const TIPOS = {
+  INTRUSAO: ["Intrusão detectada", "Movimento com o sistema armado"],
+  ARMADO: ["Sistema armado", "Levi começou a vigiar"],
+  DESARMADO: ["Sistema desarmado", "Levi foi dormir"]
+};
+
+/* ---------- desenho ---------- */
+function renderHeat() {
+  const now = Date.now(), b = Array(24).fill(0);
+  EV.forEach((e) => {
+    if (e.tipo !== "INTRUSAO") return;
+    const h = Math.floor((now - e.ts) / 3600000);
+    if (h >= 0 && h < 24) b[23 - h]++;
+  });
+  const total = b.reduce((a, n) => a + n, 0);
+  $("strip").innerHTML = b.map((n, i) => {
+    const h = 23 - i;
+    return '<i class="' + (n > 1 ? "h2" : n ? "h1" : "") + '" title="' + n + (n === 1 ? " intrusão " : " intrusões ") + (h === 0 ? "na última hora" : "há " + h + " h") + '"></i>';
+  }).join("");
+  $("heatN").textContent = total ? total + (total === 1 ? " intrusão" : " intrusões") : "nenhuma intrusão";
+}
+
+function render() {
+  let s = "offline", word = "sem sinal", sub = "O sistema não envia dados há mais de 15 segundos.";
+  if (online) {
+    if (S.alarme) { s = "alarme"; word = "em alerta!"; sub = "Movimento detectado com o sistema armado."; }
+    else if (S.armado) { s = "armado"; word = "vigiando"; sub = "De olho no sensor de movimento."; }
+    else { s = "desarmado"; word = "dormindo"; sub = "Movimentos são ignorados e nenhum alerta é enviado."; }
+  }
+  const hero = $("hero");
+  hero.dataset.s = s;
+  hero.dataset.m = online && S.pir ? "1" : "0";
+  document.title = s === "alarme" ? "ALERTA · Levi" : "Levi · Sistema-32";
+  $("word").textContent = word;
+  $("sub").textContent = pending ? "Comando enviado. Aguardando o sistema…" : sub;
+
+  $("conn").className = "pill " + (online ? "on" : "off");
+  $("connTxt").textContent = demo ? "Demonstração" : online ? "Online · " + ago(S.ts) : "Offline";
+
+  const sw = $("sw");
+  sw.setAttribute("aria-checked", S.armado ? "true" : "false");
+  sw.disabled = !online || !!pending;
+  $("swLbl").textContent = S.armado ? "Armado" : "Desarmado";
+
+  $("cMov").dataset.m = online && S.pir ? "1" : "0";
+  $("pir").textContent = !online ? "—" : S.pir ? "SIM!" : "Não";
+  $("pirN").textContent = !online ? "Sem leitura" : S.pir ? "Tem alguém se mexendo" : "Tudo calmo por aqui";
+  $("oc").textContent = S.ocorrencias || 0;
+
+  const r = S.rssi;
+  $("rssi").textContent = r == null ? "—" : r + " dBm";
+  const lvl = r == null ? 0 : r >= -55 ? 4 : r >= -65 ? 3 : r >= -75 ? 2 : 1;
+  [...$("bars").children].forEach((el, i) => el.classList.toggle("on", i < lvl));
+  $("up").textContent = online ? fmtUp(S.uptime) : "—";
+
+  renderHeat();
+
+  const ul = $("events");
+  $("logN").textContent = EV.length ? "últimos " + EV.length : "";
+  if (!EV.length) { ul.innerHTML = '<li class="vazio">Nada por aqui ainda. Arme o Levi e acione o sensor.</li>'; return; }
+  ul.innerHTML = EV.map((e) => {
+    const t = TIPOS[e.tipo] || [e.tipo, ""];
+    const n = e.tipo === "INTRUSAO" && e.ocorrencias ? " nº " + e.ocorrencias : "";
+    return '<li data-k="' + (e.tipo || "") + '"><span class="hora">' + fmtClock(e.ts) + '</span>' +
+      '<span class="txt">' + t[0] + n + '<small>' + t[1] + '</small></span><span class="quando">' + ago(e.ts) + '</span></li>';
+  }).join("");
+}
+
+/* ---------- Firebase (REST) ---------- */
+async function pull() {
+  const b = baseUrl();
+  try {
+    const [est, evs] = await Promise.all([
+      fetch(b + RAIZ + "/estado.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+      fetch(b + RAIZ + "/eventos.json?orderBy=" + encodeURIComponent('"$key"') + "&limitToLast=30").then((r) => r.json())
+    ]);
+    if (est) {
+      S = { armado: !!est.armado, alarme: !!est.alarme, pir: !!est.pir, rssi: est.rssi ?? null, uptime: est.uptime || 0, ocorrencias: est.ocorrencias || 0, ts: est.atualizadoEm || 0 };
+      online = Date.now() - S.ts < ONLINE_MS;
+      if (pending && S.armado === pending.alvo) pending = null;
+      if (pending && Date.now() - pending.t > 10000) pending = null;
+    } else { online = false; }
+    EV = evs && typeof evs === "object" ? Object.values(evs).sort((a, c) => c.ts - a.ts) : [];
+  } catch (e) { online = false; }
+  render();
+}
+
+async function alternar() {
+  const cmd = S.armado ? "desarmar" : "armar";
+  if (demo) { demoSet(!S.armado); return; }
+  pending = { alvo: !S.armado, t: Date.now() };
+  render();
+  try { await fetch(baseUrl() + RAIZ + "/comando.json", { method: "PUT", body: JSON.stringify(cmd) }); }
+  catch (e) { pending = null; }
+  render();
+}
+
+/* ---------- modo demonstração ---------- */
+function demoPush(tipo) { EV.unshift({ tipo, ts: Date.now(), ocorrencias: S.ocorrencias }); EV = EV.slice(0, 30); }
+function demoSet(arm) { S.armado = arm; S.alarme = false; S.pir = false; S.ts = Date.now(); demoPush(arm ? "ARMADO" : "DESARMADO"); render(); }
+function startDemo() {
+  demo = true; online = true;
+  const now = Date.now();
+  S = { armado: true, alarme: false, pir: false, rssi: -58, uptime: 1394, ocorrencias: 3, ts: now };
+  EV = [
+    { tipo: "INTRUSAO", ts: now - 71000, ocorrencias: 3 },
+    { tipo: "INTRUSAO", ts: now - 188000, ocorrencias: 2 },
+    { tipo: "ARMADO", ts: now - 241000 },
+    { tipo: "DESARMADO", ts: now - 602000 },
+    { tipo: "INTRUSAO", ts: now - 733000, ocorrencias: 1 },
+    { tipo: "ARMADO", ts: now - 810000 }
+  ];
+  let ate = 0;
+  setInterval(() => {
+    S.uptime++; S.ts = Date.now();
+    S.rssi = -58 + Math.round(Math.sin(S.uptime / 7) * 4);
+    if (S.alarme && Date.now() > ate) S.alarme = false;
+    S.pir = S.alarme;
+    if (S.armado && !S.alarme && Math.random() < 0.06) { S.alarme = true; S.pir = true; S.ocorrencias++; ate = Date.now() + 6000; demoPush("INTRUSAO"); }
+    render();
+  }, 1000);
+  render();
+}
+
+/* ---------- tema ---------- */
+function temaAtual() { return document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+function aplicaTema(t) { document.documentElement.dataset.theme = t; $("temaBtn").textContent = t === "dark" ? "☀ claro" : "☾ escuro"; }
+$("temaBtn").addEventListener("click", () => {
+  const t = temaAtual() === "dark" ? "light" : "dark";
+  aplicaTema(t);
+  try { localStorage.setItem("leviTema", t); } catch (e) {}
+});
+let salvo = null;
+try { salvo = localStorage.getItem("leviTema"); } catch (e) {}
+aplicaTema(salvo === "dark" || salvo === "light" ? salvo : temaAtual());
+
+/* ---------- início ---------- */
+$("sw").addEventListener("click", alternar);
+if (baseUrl()) { pull(); setInterval(pull, POLL_MS); } else { startDemo(); }
+</script>
+
+</body>
+</html>
